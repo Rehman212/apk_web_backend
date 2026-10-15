@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Apk {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  developer   String   @default("Unknown")
+  packageName String   @unique
+  kind        String   @default("app")
+  category    String   @default("tools")
+  homeSection String   @default("latest-updates")
+  version     String   @default("1.0.0")
+  size        String   @default("—")
+  apkUrl      String?
+  iconUrl     String?
+  short       String   @default("")
+  description String   @default("") @db.Text
+  requires    String   @default("Android 8.0+")
+  accent      String   @default("#2f7bff")
+  letter      String   @default("A")
+  payload     Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([kind])
+  @@index([category])
+  @@index([homeSection])
+}
