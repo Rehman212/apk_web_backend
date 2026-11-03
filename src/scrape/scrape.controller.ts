@@ -18,9 +18,14 @@ export class ScrapeController {
   constructor(private readonly scrape: ScrapeService) {}
 
   @Post('apk/start')
-  start(@Body() body: { url?: string }) {
+  start(@Body() body: { url?: string; limit?: number | string | null }) {
     try {
-      return this.scrape.start(String(body?.url || ''));
+      const raw = body?.limit;
+      const limit =
+        raw === undefined || raw === null || raw === ''
+          ? undefined
+          : Number(raw);
+      return this.scrape.start(String(body?.url || ''), limit);
     } catch (err) {
       throw new BadRequestException(err instanceof Error ? err.message : 'Invalid request');
     }

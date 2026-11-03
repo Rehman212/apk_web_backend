@@ -144,6 +144,7 @@ export async function discoverApks(
   website: string,
   onProgress?: (total: number, current: string) => void,
   cancelled?: () => boolean,
+  limit?: number,
 ): Promise<{ urls: string[]; errors: string[] }> {
   assertAndroidApksUrl(website);
   const queue = ['https://androidapks.com/sitemap.xml'];
@@ -154,8 +155,9 @@ export async function discoverApks(
     ignoreAttributes: false,
     removeNSPrefix: true,
   });
+  const enough = () => typeof limit === 'number' && apps.size >= limit;
 
-  while (queue.length && !(cancelled && cancelled())) {
+  while (queue.length && !(cancelled && cancelled()) && !enough()) {
     const url = queue.shift()!;
     if (seen.has(url)) continue;
     seen.add(url);
@@ -165,6 +167,7 @@ export async function discoverApks(
       const isIndex = Boolean(doc?.sitemapindex);
       const locs = collectLocs(doc);
       for (const loc of locs) {
+        if (enough()) break;
         try {
           assertAndroidApksUrl(loc);
         } catch {
@@ -198,7 +201,8 @@ export async function discoverApks(
   if (!apps.size && !(cancelled && cancelled())) {
     throw new Error(`No APK listing URLs found. ${errors.slice(0, 3).join(' ')}`);
   }
-  return { urls: [...apps].sort(), errors };
+  const urls = [...apps].sort();
+  return { urls: limit ? urls.slice(0, limit) : urls, errors };
 }
 
 export async function scrapeApkPage(url: string): Promise<ApkRecord> {

@@ -27,6 +27,7 @@ export type ScrapeJob = {
   current: string;
   cancel: boolean;
   skipped: number;
+  limit?: number;
   message?: string;
 };
 
@@ -34,8 +35,9 @@ export type ScrapeJob = {
 export class ScrapeService {
   private readonly jobs = new Map<string, ScrapeJob>();
 
-  start(website: string) {
+  start(website: string, limit?: number) {
     assertAndroidApksUrl(website);
+    const capped = this.parseLimit(limit);
     for (const job of this.jobs.values()) {
       if (
         (job.status === 'discovering' || job.status === 'running') &&
@@ -56,10 +58,19 @@ export class ScrapeService {
       current: '',
       cancel: false,
       skipped: 0,
+      limit: capped,
     };
     this.jobs.set(id, job);
     void this.run(job);
-    return { id };
+    return { id, limit: capped ?? null };
+  }
+
+  private parseLimit(limit?: number) {
+    if (limit === undefined || limit === null || Number.isNaN(Number(limit))) return undefined;
+    const n = Math.floor(Number(limit));
+    if (n < 1) throw new Error('Limit must be a positive whole number, or leave blank for all.');
+    if (n > 50000) throw new Error('Limit too high. Use 50000 or less.');
+    return n;
   }
 
   cancel(id: string) {
@@ -79,6 +90,7 @@ export class ScrapeService {
       current: job.current,
       cancel: job.cancel,
       skipped: job.skipped,
+      limit: job.limit ?? null,
       success: job.products.length,
       errors: job.errors,
       message: job.message || '',
@@ -118,18 +130,20 @@ export class ScrapeService {
           job.current = current;
         },
         () => job.cancel,
+        job.limit,
       );
       job.errors.push(...errors.map((error) => ({ url: '', error })));
       if (job.cancel) {
         job.status = 'cancelled';
         return;
       }
+      const selected = job.limit ? urls.slice(0, job.limit) : urls;
       job.status = 'running';
-      job.total = urls.length;
+      job.total = selected.length;
       const seen = new Set<string>();
       let accessFailures = 0;
 
-      for (const url of urls) {
+      for (const url of selected) {
         if (job.cancel) break;
         job.current = url;
         try {
