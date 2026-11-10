@@ -28,6 +28,8 @@ export type ScrapeJob = {
   cancel: boolean;
   skipped: number;
   limit?: number;
+  mode: 'catalog' | 'custom';
+  urls?: string[];
   message?: string;
 };
 
@@ -35,23 +37,28 @@ export type ScrapeJob = {
 export class ScrapeService {
   private readonly jobs = new Map<string, ScrapeJob>();
 
-  start(website: string, limit?: number) {
-    assertAndroidApksUrl(website);
-    const capped = this.parseLimit(limit);
+  start(website: string, limit?: number, urls?: string[]) {
+    const customUrls = this.parseCustomUrls(urls);
+    const mode: 'catalog' | 'custom' = customUrls.length ? 'custom' : 'catalog';
+    const site = mode === 'custom' ? customUrls[0] : website;
+    assertAndroidApksUrl(site);
+    const capped = mode === 'custom' ? customUrls.length : this.parseLimit(limit);
+
     for (const job of this.jobs.values()) {
       if (
         (job.status === 'discovering' || job.status === 'running') &&
         this.sameSite(job.website)
       ) {
-        return { id: job.id };
+        return { id: job.id, limit: job.limit ?? null, mode: job.mode };
       }
     }
+
     const id = randomBytes(16).toString('hex');
     const job: ScrapeJob = {
       id,
-      website: website.trim(),
-      status: 'discovering',
-      total: 0,
+      website: mode === 'custom' ? customUrls[0] : website.trim(),
+      status: mode === 'custom' ? 'running' : 'discovering',
+      total: mode === 'custom' ? customUrls.length : 0,
       processed: 0,
       products: [],
       errors: [],
@@ -59,10 +66,38 @@ export class ScrapeService {
       cancel: false,
       skipped: 0,
       limit: capped,
+      mode,
+      urls: mode === 'custom' ? customUrls : undefined,
     };
     this.jobs.set(id, job);
     void this.run(job);
-    return { id, limit: capped ?? null };
+    return { id, limit: capped ?? null, mode };
+  }
+
+  private parseCustomUrls(urls?: string[]) {
+    if (!urls?.length) return [] as string[];
+    const cleaned = [
+      ...new Set(
+        urls
+          .flatMap((line) => String(line || '').split(/[\n,]+/))
+          .map((u) => u.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (!cleaned.length) return [];
+    for (const url of cleaned) {
+      const parsed = assertAndroidApksUrl(url);
+      if (/\.(apk|apks|xapk)$/i.test(parsed.pathname) || parsed.pathname.includes('/download')) {
+        throw new Error(`App details URL chahiye, download/APK file nahi: ${url}`);
+      }
+      if (parsed.hostname.replace(/^www\./, '') === 'androidapks.com' && (parsed.pathname === '/' || !parsed.pathname.slice(1))) {
+        throw new Error('Custom mode mein specific app page URL do, homepage nahi.');
+      }
+    }
+    if (cleaned.length > 500) {
+      throw new Error('Custom URLs max 500 at a time.');
+    }
+    return cleaned;
   }
 
   private parseLimit(limit?: number) {
@@ -91,6 +126,7 @@ export class ScrapeService {
       cancel: job.cancel,
       skipped: job.skipped,
       limit: job.limit ?? null,
+      mode: job.mode,
       success: job.products.length,
       errors: job.errors,
       message: job.message || '',
@@ -123,23 +159,30 @@ export class ScrapeService {
 
   private async run(job: ScrapeJob) {
     try {
-      const { urls, errors } = await discoverApks(
-        job.website,
-        (total, current) => {
-          job.total = total;
-          job.current = current;
-        },
-        () => job.cancel,
-        job.limit,
-      );
-      job.errors.push(...errors.map((error) => ({ url: '', error })));
-      if (job.cancel) {
-        job.status = 'cancelled';
-        return;
+      let selected: string[] = [];
+      if (job.mode === 'custom' && job.urls?.length) {
+        selected = job.urls;
+        job.status = 'running';
+        job.total = selected.length;
+      } else {
+        const { urls, errors } = await discoverApks(
+          job.website,
+          (total, current) => {
+            job.total = total;
+            job.current = current;
+          },
+          () => job.cancel,
+          job.limit,
+        );
+        job.errors.push(...errors.map((error) => ({ url: '', error })));
+        if (job.cancel) {
+          job.status = 'cancelled';
+          return;
+        }
+        selected = job.limit ? urls.slice(0, job.limit) : urls;
+        job.status = 'running';
+        job.total = selected.length;
       }
-      const selected = job.limit ? urls.slice(0, job.limit) : urls;
-      job.status = 'running';
-      job.total = selected.length;
       const seen = new Set<string>();
       let accessFailures = 0;
 

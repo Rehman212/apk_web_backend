@@ -18,14 +18,29 @@ export class ScrapeController {
   constructor(private readonly scrape: ScrapeService) {}
 
   @Post('apk/start')
-  start(@Body() body: { url?: string; limit?: number | string | null }) {
+  start(
+    @Body()
+    body: {
+      url?: string;
+      limit?: number | string | null;
+      urls?: string[] | string;
+      mode?: 'catalog' | 'custom';
+    },
+  ) {
     try {
       const raw = body?.limit;
       const limit =
         raw === undefined || raw === null || raw === ''
           ? undefined
           : Number(raw);
-      return this.scrape.start(String(body?.url || ''), limit);
+      const urls = Array.isArray(body?.urls)
+        ? body.urls
+        : typeof body?.urls === 'string'
+          ? body.urls.split(/\n+/)
+          : body?.mode === 'custom' && body?.url
+            ? [body.url]
+            : undefined;
+      return this.scrape.start(String(body?.url || 'https://androidapks.com/'), limit, urls);
     } catch (err) {
       throw new BadRequestException(err instanceof Error ? err.message : 'Invalid request');
     }
