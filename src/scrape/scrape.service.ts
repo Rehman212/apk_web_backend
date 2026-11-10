@@ -117,10 +117,13 @@ export class ScrapeService {
       if (/\.(apk|apks|xapk)$/i.test(parsed.pathname) || parsed.pathname.includes('/download')) {
         throw new Error(`App details URL chahiye, download/APK file nahi: ${url}`);
       }
+      // Apex homepage only — app pages often live on subdomains like
+      // https://tekken-8.androidapks.com/
+      const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
       const path = parsed.pathname.replace(/\/+$/, '') || '/';
-      if (path === '/') {
+      if (host === 'androidapks.com' && path === '/') {
         throw new Error(
-          `Custom mode mein specific app page URL do, category/homepage nahi. Example: https://androidapks.com/instagram/ — not ${url}`,
+          'Main homepage nahi — specific app URL do. Example: https://tekken-8.androidapks.com/',
         );
       }
     }
