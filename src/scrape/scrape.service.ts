@@ -37,7 +37,7 @@ export type ScrapeJob = {
 export class ScrapeService {
   private readonly jobs = new Map<string, ScrapeJob>();
 
-  start(website: string, limit?: number, urls?: string[]) {
+  async start(website: string, limit?: number, urls?: string[]) {
     const customUrls = this.parseCustomUrls(urls);
     const mode: 'catalog' | 'custom' = customUrls.length ? 'custom' : 'catalog';
     const site = mode === 'custom' ? customUrls[0] : website;
@@ -49,7 +49,13 @@ export class ScrapeService {
         (job.status === 'discovering' || job.status === 'running') &&
         this.sameSite(job.website)
       ) {
-        return { id: job.id, limit: job.limit ?? null, mode: job.mode };
+        return {
+          id: job.id,
+          limit: job.limit ?? null,
+          mode: job.mode,
+          status: job.status,
+          success: job.products.length,
+        };
       }
     }
 
@@ -70,8 +76,29 @@ export class ScrapeService {
       urls: mode === 'custom' ? customUrls : undefined,
     };
     this.jobs.set(id, job);
-    void this.run(job);
-    return { id, limit: capped ?? null, mode };
+
+    // Vercel serverless kills background work after the response — await custom
+    // (and small catalog) scrapes so results exist before the function ends.
+    const sync =
+      mode === 'custom' || (typeof capped === 'number' && capped > 0 && capped <= 20);
+    if (sync) {
+      await this.run(job);
+    } else {
+      void this.run(job);
+    }
+
+    return {
+      id,
+      limit: capped ?? null,
+      mode,
+      status: job.status,
+      success: job.products.length,
+      processed: job.processed,
+      total: job.total,
+      skipped: job.skipped,
+      errors: job.errors,
+      message: job.message || '',
+    };
   }
 
   private parseCustomUrls(urls?: string[]) {
@@ -90,8 +117,11 @@ export class ScrapeService {
       if (/\.(apk|apks|xapk)$/i.test(parsed.pathname) || parsed.pathname.includes('/download')) {
         throw new Error(`App details URL chahiye, download/APK file nahi: ${url}`);
       }
-      if (parsed.hostname.replace(/^www\./, '') === 'androidapks.com' && (parsed.pathname === '/' || !parsed.pathname.slice(1))) {
-        throw new Error('Custom mode mein specific app page URL do, homepage nahi.');
+      const path = parsed.pathname.replace(/\/+$/, '') || '/';
+      if (path === '/') {
+        throw new Error(
+          `Custom mode mein specific app page URL do, category/homepage nahi. Example: https://androidapks.com/instagram/ — not ${url}`,
+        );
       }
     }
     if (cleaned.length > 500) {

@@ -18,7 +18,7 @@ export class ScrapeController {
   constructor(private readonly scrape: ScrapeService) {}
 
   @Post('apk/start')
-  start(
+  async start(
     @Body()
     body: {
       url?: string;
@@ -40,7 +40,11 @@ export class ScrapeController {
           : body?.mode === 'custom' && body?.url
             ? [body.url]
             : undefined;
-      return this.scrape.start(String(body?.url || 'https://androidapks.com/'), limit, urls);
+      return await this.scrape.start(
+        String(body?.url || 'https://androidapks.com/'),
+        limit,
+        urls,
+      );
     } catch (err) {
       throw new BadRequestException(err instanceof Error ? err.message : 'Invalid request');
     }
