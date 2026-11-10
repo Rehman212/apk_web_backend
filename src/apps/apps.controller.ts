@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AppsService } from './apps.service';
 import { PatchApkDto, UpsertApkDto } from './dto/apk.dto';
@@ -11,6 +20,13 @@ export class AppsController {
   @Get('home')
   home() {
     return this.apps.homeFeed(6);
+  }
+
+  /** Public single APK by slug (storefront detail) */
+  @Get('by-slug/:slug')
+  async bySlug(@Param('slug') slug: string) {
+    const app = await this.apps.findBySlug(slug);
+    return { app };
   }
 
   @Get('sections')
@@ -43,6 +59,12 @@ export class AppsController {
   async patch(@Param('id') id: string, @Body() dto: PatchApkDto) {
     const app = await this.apps.patch(id, dto);
     return { ok: true, app };
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  async remove(@Param('id') id: string) {
+    return this.apps.remove(id);
   }
 
   @Post('bulk')

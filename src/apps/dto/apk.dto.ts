@@ -81,9 +81,57 @@ export class PatchApkDto {
 
   @IsOptional()
   @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  packageName?: string;
+
+  @IsOptional()
+  @IsString()
   category?: string;
 
   @IsOptional()
   @IsString()
   kind?: string;
+
+  @IsOptional()
+  @IsString()
+  developer?: string;
+
+  @IsOptional()
+  @IsString()
+  version?: string;
+
+  @IsOptional()
+  @IsString()
+  size?: string;
+
+  @IsOptional()
+  @IsString()
+  apkUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  iconUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  short?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  requires?: string;
+
+  @IsOptional()
+  @IsString()
+  accent?: string;
+
+  @IsOptional()
+  @IsString()
+  letter?: string;
 }

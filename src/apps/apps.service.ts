@@ -94,24 +94,91 @@ export class AppsService {
     });
   }
 
+  async findBySlug(slug: string) {
+    const app = await this.prisma.apk.findUnique({ where: { slug: slug.trim() } });
+    if (!app) throw new NotFoundException('APK not found');
+    return app;
+  }
+
   async patch(id: string, dto: PatchApkDto) {
     const existing = await this.prisma.apk.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('APK not found');
 
     const homeSection =
-      dto.homeSection && isHomeSection(dto.homeSection)
-        ? dto.homeSection
+      dto.homeSection !== undefined
+        ? isHomeSection(dto.homeSection)
+          ? dto.homeSection
+          : existing.homeSection
         : undefined;
+
+    const name = dto.name !== undefined ? dto.name.trim() : undefined;
+    const letter =
+      dto.letter !== undefined
+        ? dto.letter.trim().slice(0, 2).toUpperCase() || existing.letter
+        : name
+          ? name.slice(0, 2).toUpperCase()
+          : undefined;
+
+    const data = {
+      ...(homeSection !== undefined ? { homeSection } : {}),
+      ...(name !== undefined ? { name } : {}),
+      ...(dto.slug !== undefined ? { slug: dto.slug.trim() } : {}),
+      ...(dto.packageName !== undefined
+        ? { packageName: dto.packageName.trim() }
+        : {}),
+      ...(dto.category !== undefined ? { category: dto.category.trim() } : {}),
+      ...(dto.kind !== undefined ? { kind: dto.kind.trim() } : {}),
+      ...(dto.developer !== undefined
+        ? { developer: dto.developer.trim() || 'Unknown' }
+        : {}),
+      ...(dto.version !== undefined
+        ? { version: dto.version.trim() || existing.version }
+        : {}),
+      ...(dto.size !== undefined ? { size: dto.size.trim() || '—' } : {}),
+      ...(dto.apkUrl !== undefined
+        ? { apkUrl: dto.apkUrl.trim() || null }
+        : {}),
+      ...(dto.iconUrl !== undefined
+        ? { iconUrl: dto.iconUrl.trim() || null }
+        : {}),
+      ...(dto.short !== undefined ? { short: dto.short.trim() } : {}),
+      ...(dto.description !== undefined
+        ? { description: dto.description.trim() }
+        : {}),
+      ...(dto.requires !== undefined
+        ? { requires: dto.requires.trim() || 'Android 8.0+' }
+        : {}),
+      ...(dto.accent !== undefined
+        ? { accent: dto.accent.trim() || '#2f7bff' }
+        : {}),
+      ...(letter !== undefined ? { letter } : {}),
+    };
+
+    const prevPayload =
+      existing.payload && typeof existing.payload === 'object'
+        ? (existing.payload as Record<string, unknown>)
+        : null;
+    if (prevPayload) {
+      Object.assign(data, {
+        payload: {
+          ...prevPayload,
+          ...data,
+          accent2: (data as { accent?: string }).accent || prevPayload.accent2,
+        } as Prisma.InputJsonValue,
+      });
+    }
 
     return this.prisma.apk.update({
       where: { id },
-      data: {
-        ...(homeSection ? { homeSection } : {}),
-        ...(dto.name ? { name: dto.name.trim() } : {}),
-        ...(dto.category ? { category: dto.category.trim() } : {}),
-        ...(dto.kind ? { kind: dto.kind.trim() } : {}),
-      },
+      data,
     });
+  }
+
+  async remove(id: string) {
+    const existing = await this.prisma.apk.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('APK not found');
+    await this.prisma.apk.delete({ where: { id } });
+    return { ok: true, id, count: await this.count() };
   }
 
   async upsertMany(items: UpsertApkDto[]) {
