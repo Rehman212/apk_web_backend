@@ -35,69 +35,114 @@ export type ScrapeJob = {
 
 @Injectable()
 export class ScrapeService {
+  static readonly BATCH = 5;
   private readonly jobs = new Map<string, ScrapeJob>();
+
+  /** One serverless-safe chunk: discover (first call) then scrape a few pages. */
+  async batch(website: string, limit?: number, urls?: string[], modeHint?: 'catalog' | 'custom') {
+    const incoming = (urls || []).map((u) => u.trim()).filter(Boolean);
+    const custom = modeHint === 'custom' || incoming.length > 0;
+    if (incoming.length) {
+      for (const url of incoming) assertAndroidApksUrl(url);
+    } else {
+      assertAndroidApksUrl(website || 'https://androidapks.com/');
+    }
+
+    const capped = incoming.length ? undefined : this.parseLimit(limit);
+    let queue = incoming;
+    const discoverErrors: string[] = [];
+
+    if (!queue.length) {
+      const found = await discoverApks(
+        website || 'https://androidapks.com/',
+        undefined,
+        undefined,
+        capped,
+      );
+      queue = found.urls;
+      discoverErrors.push(...found.errors);
+      return {
+        products: [],
+        remaining: queue,
+        batch: 0,
+        remainingCount: queue.length,
+        total: queue.length,
+        skipped: 0,
+        errors: discoverErrors.map((error) => ({ url: '', error })),
+        done: queue.length === 0,
+        mode: custom ? 'custom' : 'catalog',
+        limit: capped ?? null,
+      };
+    }
+
+    const take = queue.slice(0, ScrapeService.BATCH);
+    const remaining = queue.slice(ScrapeService.BATCH);
+    const products: ApkRecord[] = [];
+    const errors: { url: string; error: string }[] = discoverErrors.map((error) => ({
+      url: '',
+      error,
+    }));
+    let skipped = 0;
+
+    for (const url of take) {
+      try {
+        products.push(await scrapeApkPage(url));
+      } catch (err) {
+        if (err instanceof NotAppPageError) skipped += 1;
+        else errors.push({ url, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    return {
+      products,
+      remaining,
+      batch: take.length,
+      remainingCount: remaining.length,
+      total: take.length + remaining.length,
+      skipped,
+      errors,
+      done: remaining.length === 0,
+      mode: custom ? 'custom' : 'catalog',
+      limit: capped ?? null,
+    };
+  }
 
   async start(website: string, limit?: number, urls?: string[]) {
     const customUrls = this.parseCustomUrls(urls);
     const mode: 'catalog' | 'custom' = customUrls.length ? 'custom' : 'catalog';
-    const site = mode === 'custom' ? customUrls[0] : website;
-    assertAndroidApksUrl(site);
-    const capped = mode === 'custom' ? customUrls.length : this.parseLimit(limit);
-
-    for (const job of this.jobs.values()) {
-      if (
-        (job.status === 'discovering' || job.status === 'running') &&
-        this.sameSite(job.website)
-      ) {
-        return {
-          id: job.id,
-          limit: job.limit ?? null,
-          mode: job.mode,
-          status: job.status,
-          success: job.products.length,
-        };
-      }
-    }
-
+    const result = await this.batch(
+      website,
+      limit,
+      customUrls.length ? customUrls : undefined,
+      mode,
+    );
     const id = randomBytes(16).toString('hex');
     const job: ScrapeJob = {
       id,
-      website: mode === 'custom' ? customUrls[0] : website.trim(),
-      status: mode === 'custom' ? 'running' : 'discovering',
-      total: mode === 'custom' ? customUrls.length : 0,
-      processed: 0,
-      products: [],
-      errors: [],
+      website: (customUrls[0] || website || 'https://androidapks.com/').trim(),
+      status: result.done
+        ? result.errors.length
+          ? 'completed_with_errors'
+          : 'completed'
+        : 'running',
+      total: result.total,
+      processed: result.batch,
+      products: result.products,
+      errors: result.errors,
       current: '',
       cancel: false,
-      skipped: 0,
-      limit: capped,
+      skipped: result.skipped,
+      limit: result.limit ?? undefined,
       mode,
-      urls: mode === 'custom' ? customUrls : undefined,
+      urls: result.remaining,
     };
     this.jobs.set(id, job);
-
-    // Vercel serverless kills background work after the response — await custom
-    // (and small catalog) scrapes so results exist before the function ends.
-    const sync =
-      mode === 'custom' || (typeof capped === 'number' && capped > 0 && capped <= 20);
-    if (sync) {
-      await this.run(job);
-    } else {
-      void this.run(job);
-    }
-
     return {
       id,
-      limit: capped ?? null,
-      mode,
+      ...result,
       status: job.status,
-      success: job.products.length,
-      processed: job.processed,
-      total: job.total,
-      skipped: job.skipped,
-      errors: job.errors,
-      message: job.message || '',
+      success: result.products.length,
+      processed: result.batch,
     };
   }
 

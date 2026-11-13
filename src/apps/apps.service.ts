@@ -51,9 +51,9 @@ export class AppsService {
         : 'latest-updates';
 
     const data = {
-      slug: dto.slug.trim(),
+      slug: dto.slug.trim().slice(0, 80) || `app-${Date.now().toString(36)}`,
       name: dto.name.trim(),
-      packageName: dto.packageName.trim(),
+      packageName: dto.packageName.trim() || `com.imported.app${Date.now()}`,
       developer: dto.developer?.trim() || 'Unknown',
       kind: dto.kind?.trim() || 'app',
       category: dto.category?.trim() || 'tools',
@@ -63,35 +63,46 @@ export class AppsService {
       apkUrl: dto.apkUrl?.trim() || null,
       iconUrl: dto.iconUrl?.trim() || null,
       short: dto.short?.trim() || '',
-      description: dto.description?.trim() || '',
+      description: (dto.description?.trim() || '').slice(0, 20000),
       requires: dto.requires?.trim() || 'Android 8.0+',
       accent: dto.accent?.trim() || '#2f7bff',
       letter: (dto.letter || dto.name).slice(0, 2).toUpperCase(),
       payload: (dto.payload ?? undefined) as Prisma.InputJsonValue | undefined,
     };
 
-    return this.prisma.apk.upsert({
-      where: { packageName: data.packageName },
-      create: data,
-      update: {
-        slug: data.slug,
-        name: data.name,
-        developer: data.developer,
-        kind: data.kind,
-        category: data.category,
-        homeSection: data.homeSection,
-        version: data.version,
-        size: data.size,
-        apkUrl: data.apkUrl,
-        iconUrl: data.iconUrl,
-        short: data.short,
-        description: data.description,
-        requires: data.requires,
-        accent: data.accent,
-        letter: data.letter,
-        payload: data.payload,
-      },
-    });
+    const write = (slug: string) =>
+      this.prisma.apk.upsert({
+        where: { packageName: data.packageName },
+        create: { ...data, slug },
+        update: {
+          slug,
+          name: data.name,
+          developer: data.developer,
+          kind: data.kind,
+          category: data.category,
+          homeSection: data.homeSection,
+          version: data.version,
+          size: data.size,
+          apkUrl: data.apkUrl,
+          iconUrl: data.iconUrl,
+          short: data.short,
+          description: data.description,
+          requires: data.requires,
+          accent: data.accent,
+          letter: data.letter,
+          payload: data.payload,
+        },
+      });
+
+    try {
+      return await write(data.slug);
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'P2002') {
+        return write(`${data.slug}-${Date.now().toString(36).slice(-4)}`);
+      }
+      throw err;
+    }
   }
 
   async findBySlug(slug: string) {
@@ -183,11 +194,16 @@ export class AppsService {
 
   async upsertMany(items: UpsertApkDto[]) {
     let saved = 0;
+    const errors: string[] = [];
     for (const item of items) {
-      await this.upsert(item);
-      saved += 1;
+      try {
+        await this.upsert(item);
+        saved += 1;
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
     }
-    return { saved, count: await this.count() };
+    return { saved, failed: errors.length, errors: errors.slice(0, 8), count: await this.count() };
   }
 
   async assignRandomSections() {

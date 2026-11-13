@@ -17,6 +17,38 @@ import { ScrapeService } from './scrape.service';
 export class ScrapeController {
   constructor(private readonly scrape: ScrapeService) {}
 
+  @Post('apk/batch')
+  async batch(
+    @Body()
+    body: {
+      url?: string;
+      limit?: number | string | null;
+      urls?: string[] | string;
+      mode?: 'catalog' | 'custom';
+    },
+  ) {
+    try {
+      const raw = body?.limit;
+      const limit =
+        raw === undefined || raw === null || raw === ''
+          ? undefined
+          : Number(raw);
+      const urls = Array.isArray(body?.urls)
+        ? body.urls
+        : typeof body?.urls === 'string'
+          ? body.urls.split(/\n+/)
+          : undefined;
+      return await this.scrape.batch(
+        String(body?.url || 'https://androidapks.com/'),
+        limit,
+        urls,
+        body?.mode,
+      );
+    } catch (err) {
+      throw new BadRequestException(err instanceof Error ? err.message : 'Invalid request');
+    }
+  }
+
   @Post('apk/start')
   async start(
     @Body()

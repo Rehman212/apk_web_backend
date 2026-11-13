@@ -70,7 +70,8 @@ export const APK_COLUMNS: (keyof ApkRecord)[] = [
   'file_name',
 ];
 
-const UA = 'ModPlaysApkScraper/1.0';
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 export function assertAndroidApksUrl(raw: string) {
   let parsed: URL;
@@ -195,7 +196,6 @@ export async function discoverApks(
       errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
     }
     onProgress?.(apps.size, url);
-    await sleep(300);
   }
 
   if (!apps.size && !(cancelled && cancelled())) {
@@ -228,8 +228,7 @@ export function parseApkHtml(html: string, url: string): ApkRecord {
     schemas.find((s) => {
       const type = s['@type'];
       return type === 'MobileApplication' || type === 'SoftwareApplication';
-    }) || null;
-  if (!app) throw new NotAppPageError();
+    }) || ({} as Record<string, unknown>);
 
   const specs: Record<string, string> = {};
   $('.apk_file_div tr').each((_, row) => {
@@ -243,7 +242,15 @@ export function parseApkHtml(html: string, url: string): ApkRecord {
 
   const title =
     String(app.name || '') ||
-    ($('h1').first().text().replace(/\s+/g, ' ').trim() || '');
+    ($('h1').first().text().replace(/\s+/g, ' ').trim() || '') ||
+    ($('meta[property="og:title"]').attr('content') || '').replace(/\s+/g, ' ').trim();
+  const looksLikeApp =
+    Boolean(title) &&
+    (Boolean(app.name) ||
+      $('.apk_file_div').length > 0 ||
+      /apk/i.test(title) ||
+      $('a[href*="/download"]').length > 0);
+  if (!looksLikeApp) throw new NotAppPageError();
   if (!title) throw new Error('App name missing');
 
   let icon = app.image as string | Record<string, unknown> | undefined;
@@ -329,25 +336,83 @@ export function parseApkHtml(html: string, url: string): ApkRecord {
   };
 }
 
-export function toApkCsv(apps: ApkRecord[]): string {
-  const escape = (value: unknown) => {
-    let text =
-      typeof value === 'object' && value !== null
-        ? JSON.stringify(value)
-        : String(value ?? '');
-    if (text.startsWith('=') || text.startsWith('+') || text.startsWith('-') || text.startsWith('@')) {
-      text = `'${text}`;
+function csvEscape(value: unknown) {
+  let text =
+    typeof value === 'object' && value !== null
+      ? JSON.stringify(value)
+      : String(value ?? '');
+  if (text.startsWith('=') || text.startsWith('+') || text.startsWith('-') || text.startsWith('@')) {
+    text = `'${text}`;
+  }
+  if (/[",\n\r]/.test(text)) text = `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function slugFromUrl(url: string, name: string) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    const sub = host.replace(/\.androidapks\.com$/i, '');
+    if (sub && sub !== 'androidapks.com' && sub !== host) {
+      return sub.replace(/[^a-z0-9-]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
     }
-    if (/[",\n\r]/.test(text)) text = `"${text.replace(/"/g, '""')}"`;
-    return text;
-  };
-  const lines = [APK_COLUMNS.join(',')];
+    const path = new URL(url).pathname.replace(/\/+$/, '').split('/').filter(Boolean).pop() || '';
+    if (path) return path.toLowerCase();
+  } catch {
+    /* ignore */
+  }
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+}
+
+/** CSV the Upload CSV tool can import without extra mapping. */
+export function toImportCsv(apps: ApkRecord[]): string {
+  const headers = [
+    'name',
+    'packageName',
+    'version',
+    'developer',
+    'kind',
+    'category',
+    'size',
+    'apkUrl',
+    'iconUrl',
+    'short',
+    'description',
+    'requires',
+    'slug',
+  ];
+  const lines = [headers.join(',')];
   for (const app of apps) {
-    lines.push(APK_COLUMNS.map((key) => escape(app[key])).join(','));
+    const slug = slugFromUrl(app.url, app.app_name);
+    const apkUrl = app.download_page_links?.[0] || app.url;
+    const kind = /game/i.test(app.category) ? 'game' : 'app';
+    const pkg =
+      app.package_name.trim() || `com.apk.${slug.replace(/-/g, '') || 'app'}`;
+    const description = (app.description || '').slice(0, 20000);
+    lines.push(
+      [
+        app.app_name,
+        pkg,
+        app.version || '1.0.0',
+        app.developer || 'Unknown',
+        kind,
+        app.category || 'tools',
+        app.file_size || '—',
+        apkUrl,
+        app.icon,
+        description.slice(0, 160),
+        description,
+        app.minimum_android || 'Android 8.0+',
+        slug || pkg,
+      ].map(csvEscape).join(','),
+    );
   }
   return `\uFEFF${lines.join('\n')}`;
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export function toApkCsv(apps: ApkRecord[]): string {
+  return toImportCsv(apps);
 }
