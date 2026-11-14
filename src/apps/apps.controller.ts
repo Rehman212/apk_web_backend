@@ -35,6 +35,12 @@ export class AppsController {
     return { sections: await this.apps.sectionCounts() };
   }
 
+  @Get('stats')
+  @UseGuards(JwtAuthGuard)
+  stats() {
+    return this.apps.stats();
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard)
   async list() {

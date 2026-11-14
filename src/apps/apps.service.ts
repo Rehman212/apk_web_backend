@@ -16,6 +16,26 @@ export class AppsService {
     return this.prisma.apk.count();
   }
 
+  async stats() {
+    const [count, kinds, categories] = await Promise.all([
+      this.prisma.apk.count(),
+      this.prisma.apk.groupBy({ by: ['kind'], _count: { _all: true } }),
+      this.prisma.apk.groupBy({ by: ['category'], _count: { _all: true } }),
+    ]);
+    const kindMap = Object.fromEntries(kinds.map((k) => [k.kind, k._count._all]));
+    const applications = kindMap.app ?? 0;
+    const games = kindMap.game ?? 0;
+    return {
+      count,
+      applications: applications || Math.max(0, count - games),
+      games,
+      byCategory: categories
+        .map((c) => ({ slug: c.category, count: c._count._all }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 12),
+    };
+  }
+
   sectionsMeta() {
     return HOME_SECTIONS;
   }
